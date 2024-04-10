@@ -1,22 +1,35 @@
 #!/usr/bin/python3
 '''
-A small HTTP-served app that serves spacy's parsing from a persistent process, to do continuing work without startup time each time.
+    A small HTTP-served app that serves spacy's parsing from a persistent process,
+    to do continuing work without incurring a whole bunch of startup time.
 
-WSGI-style app, served via the basic HTTP server
-TODO: disentangle out app from that
+    WSGI-style app, served via the basic HTTP server
+    TODO: disentangle out app from that
 
-In extras, and not considered part of regular use, because 
-    - it's extra dependencies,
-    - it returns the parse in a non-standard way  (cherry-picking things to put in JSON)
-    - it's not necessary in most batch use or in most notebooks 
-      (in both cases it's often fine to incur startup cost just once)
-...it's nice to have for web interfaces, though, because it can give answers to short text within ~20ms.
+    Not part of core wetsuite because 
+     - it's extra dependencies,
+     - it returns the parse in a non-standard way  (cherry-picking things to put in JSON)
+     - it's not necessary in most batch use or in most notebooks 
+       (in both cases it's often fine to incur startup cost just once)
+    ...it's nice to have for web interfaces, though,
+    because it can give answers to short text within ~20ms
+    (CPU models seem to take on the rough order of 20ms per 100 words)
+    
+    CONSIDER: 
+    - trying to be multicore. That would need
+      - letting you specify CPU models multiple times, to load it several times,
+        and be able to use the same model on multiple cores?
+      - (except we would probably need to engineer around the GIL with multiprocessing?)
+      - serving in a way that allows that 
+        (e.g. starlette / uvicorn to host most things on a standalone async thing)
+      - pick_model to be aware of which ones are currently in use
 
-CONSIDER: rewrite to starlette / uvicorn to host most things on a standalone async thing
-TODO:     try parsing in smaller chunks, and stream out results
+    - try parsing in smaller chunks, and stream out results    
+      - maybe put up a text limit on individual calls?
+      - and provide a helper function that makes that easier, even if it's just based on 
+        re.split(\n{2,}) and doing multiple calls
 '''
-#from typing import List
-
+import spacy
 
 def load_models( model_list ):
     ''' @param model_list: A list of 3-tuples, each
@@ -31,15 +44,14 @@ def load_models( model_list ):
             - spacy model object
     '''
     ret = []
-    import spacy
     for lang, cpu_or_gpu, model_name in model_list:
         if cpu_or_gpu=='gpu':
             spacy.require_gpu()
         elif cpu_or_gpu=='cpu':
             spacy.require_cpu()
         else:
-            raise ValueError("Don't understand preference %r"%cpu_or_gpu)
-        print("loading %s (%s)"%(model_name, cpu_or_gpu))
+            raise ValueError( f"Don't understand preference {cpu_or_gpu}" )
+        print( f"loading model {model_name}, {cpu_or_gpu}" )
         try:
             ref = spacy.load(model_name)
             # experiments trying to avoid a memory leak
@@ -48,16 +60,21 @@ def load_models( model_list ):
             #        ref.get_pipe(pipename).model.attrs['flush_cache_chance'] = 1
             ret.append( (lang, cpu_or_gpu, model_name, ref) )
         except OSError:
-            print("ERROR: %r probably not installed, you may want to do something like:   python -m spacy download %s"%(model_name,model_name))
+            print(
+                f"ERROR: specified model {repr(model_name)} probably not installed, "+
+                f"you may want to do something like:   python -m spacy download {str(model_name)}"
+            )
     return ret
 
 
-def pick_model(loaded_models, lang:str=None, name:str=None, fallback=True):
-    ''' Given preferences (probably in terms of language, possibly model name)
-        and returns the model that is loaded that best fits that.
+def pick_model( loaded_models, lang:str=None, name:str=None, fallback:bool=True):
+    ''' Given 
+        - what load_models has done
+        - your preferences (probably in terms of language, possibly model name)
+        ...returns the model object that is loaded that best fits that.
 
-        The code below mostly just wants one of the right language (in my tests 'nl' or 'en'),
-        via language detection 
+        The code below mostly just wants one of the right language 
+        (in my tests 'nl' or 'en'), via language detection 
         
         CONSIDER: implement preference if we have multiple for a language?
     '''
@@ -85,17 +102,19 @@ if __name__ == '__main__':
     import time
     import argparse
 
-    try: # make it clearer in top and nvidia-smi what the process is - if you happen to have this package
+    try: # make it clearer in top and nvidia-smi what this process is
         import setproctitle
         setproctitle.setproctitle( os.path.basename(sys.argv[0]) )
-    except ImportError:
-        pass
+    except ImportError: # ...if you happen to have this package,
+        pass            # otherwise just silently ignore it
 
     from wsgiref.simple_server import make_server
-    import paste, paste.request
+    import paste
+    import paste.request
     import torch
-    torch.set_num_threads(1)   # experiments trying to avoid a memory leak
-    #import spacy
+    # experiments trying to avoid a library's memory leak  (maybe try-except-pass just in case?)
+    torch.set_num_threads(1)
+    import spacy
 
     import wetsuite.helpers.spacy
     import wetsuite.helpers.spacyserver
@@ -103,28 +122,47 @@ if __name__ == '__main__':
 
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--model",           action="store",       dest="model",          default="en_core_web_sm",
-                        help="Which model to use.")
-    parser.add_argument("-i", "--bind-ip",         action="store",       dest="bind_ip",        default="0.0.0.0",
-                        help="What IP to bind on. Default is all interfaces (0.0.0.0), you might prefer 127.0.0.1")
-    parser.add_argument("-p", "--bind-port",       action="store",       dest='bind_port',      default="8282",
-                        help="What port to bind on. Default is 8282.")
-    # parser.add_argument("-g", "--prefer-gpu",      action="store_true",  dest="prefer_gpu",     default=False,
+    parser.add_argument("-m", "--model",
+                        action="store",
+                        dest="model",
+                        default="en_core_web_sm",
+                        help="Which model to use. "+
+                              "Defaults to en_core_web_sm (assumes you have that installed)")
+    parser.add_argument("-i", "--bind-ip",
+                        action="store",
+                        dest="bind_ip",
+                        default="0.0.0.0",
+                        help="What IP to bind on. "+
+                            "Default is all interfaces (0.0.0.0), you might prefer 127.0.0.1")
+    parser.add_argument("-p", "--bind-port",
+                        action="store",
+                        dest='bind_port',
+                        default="8282",
+                        help="What TCP port to bind on. Default is 8282.")
+    # parser.add_argument("-g", "--prefer-gpu",
+    #                     action="store_true",
+    #                     dest="prefer_gpu",
+    #                     default=False,
     #                     help="Whether to try running on GPU (falls back to CPU if it can't).")
-    # parser.add_argument("-G", "--require-gpu",     action="store_true",  dest="require_gpu",    default=False,
+    # parser.add_argument("-G", "--require-gpu",
+    #                     action="store_true",
+    #                     dest="require_gpu",
+    #                     default=False,
     #                     help="Whether to run on GPU (fails if it can't).")
-    # parser.add_argument('-v', "--verbose",         action="count",                              default=0,
+    # parser.add_argument('-v', "--verbose",
+    #                     action="count",
+    #                     default=0,
     #                     help="debug verbosity (repeat for debug)")
     args = parser.parse_args()
 
+
+    ## prep for serving
     serve_ip = args.bind_ip
     port     = int( args.bind_port )
 
-    # CONSIDER: letting you specify CPU models multiple times, mainly to be able to use the same model on multiple cores?
-    #  (except that may not work because GIL, and we would need multiprocessing)
-    models_to_load = [
-        ['en','cpu','en_core_web_lg' ], # gpu
-        ['nl','cpu','nl_core_news_lg'], # gpu
+    models_to_load = [ # try to not occupy the GPU unless you know your're its only user.
+        ['en','cpu','en_core_web_lg' ],
+        ['nl','cpu','nl_core_news_lg'],
         #['fr','cpu','fr_core_news_md'],
         #['de','cpu','de_core_news_md'],
     ]
@@ -134,54 +172,63 @@ if __name__ == '__main__':
 
     ## Serve via HTTP
     def application(environ, start_response):
-        ' Mostly just calls wetsuite.helpers.spacy.parse, which calls nlp() and returns a json-usable dict.   Single-purpose, ignores path. '
+        ''' Mostly just calls wetsuite.helpers.spacy.parse, which calls nlp() 
+            and returns a json-usable dict.   
+            Single-purpose, ignores path.
+        '''
         output, response_headers = [], []
 
         reqvars  = paste.request.parse_formvars(environ, include_get_vars=True)
         q        = reqvars.get('q', None)
         want_svg = reqvars.get('want_svg', 'n') == 'y'
 
-        ret = {} # will be sent as JSON
+        response = {} # collect as dict, will be sent as JSON
         if q in (None,''):
-            q = 'You gave us no input.'
+            q = 'You gave us no input.'     # yes, that will get parsed.
 
+
+        ## Detect the language of input text
         start = time.time()
-        #doc = wetsuite.helpers.spacy.sentence_split(q)
-        #for sent_span in doc.sents:
-        #    sent_text = sent_span.text.strip()
-        #    start = time.time()
-        # seems to take on the order of 20ms per 100 words
-        #   so we could consider feeding it only the first 1000 or so words
         lang, _ = wetsuite.helpers.spacy.detect_language( q )
-        #    took = time.time() - start
-        #    #print("SENTENCE / %3s in %.2fms / %s"%(lang, 1000.*took, sent_text))
-        ret['lang_detect_msec'] = '%d'%(1000*(time.time() - start))
+        response['lang_detect_msec'] = '%d'%(1000*(time.time() - start))
+        # CONSIDER: feed language detection only the first so-many words
 
+
+        ## Choose a fitting model based on detected language
         model_name, nlp = pick_model( loaded_models, lang )
         #print("Using %s: %s for this input"%(lang, model_name))
 
-        #import cupy_backends # for underlying exception, see below
+
+        ## Do the parse
+        #import cupy_backends # purely for underlying exception, see below;
+        #  commented to not hardcode a dependency for now
         try:
             # spacyserver.parse() puts the interesting parts of the nlp object in JSON.
             #   this is non-standard and is only understood by some of our own browser code
             #   (also is faster than trying to save/parse as docbin or pickle)
-            dic = wetsuite.helpers.spacyserver.parse(nlp=nlp, query_string=q, nlp_lock=nlp_lock, want_svg=want_svg)
-            ret.update( dic )
-            ret['status'] = 'ok'
+            dic = wetsuite.helpers.spacyserver.parse(
+                nlp=nlp,
+                query_string=q,
+                nlp_lock=nlp_lock,
+                want_svg=want_svg
+            )
+            response.update( dic )  # which includes a (server-side) parse time
+            response['status'] = 'ok'
 
-        # seems to inherit directly from builtins.RuntimeError, so until we need this for
-        #    "okay that's probably a memory allocation thing", let it pass through to the next case
         #except cupy_backends.cuda.libs.cublas.CUBLASError as e:
+        #    # seems to inherit directly from builtins.RuntimeError,
+        #    # so until we specifically need this for "that's probably a memory allocation thing"
+        #    # logic, let it pass through to the next case
         #    ret['status'] = 'error'
         #    ret['error']  = str(e)
         except RuntimeError as e:   # Probably "CUDA out of memory" (with details)
-            ret['status'] = 'error'
-            ret['error']  = str(e)
+            response['status'] = 'error'
+            response['error']  = str(e)
 
-        ret['model'] = model_name
-        ret['lang']  = lang
+        response['model'] = model_name
+        response['lang']  = lang
 
-        output = [ json.dumps( ret ).encode('utf8') ]
+        output = [ json.dumps( response ).encode('utf8') ]
 
         status='200 OK'
         response_headers.append( ('Content-type',   'application/json') )
