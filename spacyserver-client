@@ -15,6 +15,7 @@ def main():
     else:
         q = sys.stdin.read()
 
+    q = q.strip()  # avoid a SPACE on the end from a stdin newline
 
     start = time.time()
     resp = wetsuite.helpers.spacyserver.http_api(q)
