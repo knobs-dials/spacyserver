@@ -1,4 +1,4 @@
-# wetsuite-spacyserver
+# spacyserver
 
 A small HTTP-served app that serves spacy's parsing from a persistent process,
 to do continuing work without incurring a whole bunch of startup time.
@@ -16,14 +16,13 @@ Upsides:
 
 
 Arguables / downsides:
-- Depends on functions in the wetsuite core - could be moved
+- this is not necessary in most batch use, or in most notebooks, 
+  because you're loading the model to use it persistently and you're fine to incur that startup cost just once
 
 - It returns our own flattened-data version of the spacy objects (cherry-picking things to put in JSON)
-  - so it's yet another variant, and for anything nontrivial you may want to impement on the spacy side, not this receiving side
   - (yes, in theory spacy allows you to serialize the objects, but in practice this is messy and very inefficient)
-
-- not necessary in most batch use or in most notebooks, 
-  because you're loading the model to use it persistently and you're fine to incur that startup cost just once
+  - so it's yet another variant
+  - and there are plenty of things you couldn't really implement client-side without more work
 
 - not concurrent (yet?)
   If indeed you put this up for public consumption, it will slow down with amount of users
