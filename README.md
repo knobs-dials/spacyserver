@@ -48,8 +48,9 @@ The server part of the server:
 
 The functional part of using one model on one piece of text, and deciding what to return:
 - `http_api()` is used by the client, which feeds the given text to a running spacy_server
-- `parse()` is used by the server - feeds text to an instantiated model.
-  - decides what to take from the 
+- `parse()` is used by the server hander (that runs as a result of calling http_api on the client side)
+  - feeds text to an instantiated model.
+  - decides what to take from the resulting parse
   - includes a hacky transform of the SVG dependency image, if you want it
 
 
