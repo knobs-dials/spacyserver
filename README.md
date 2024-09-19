@@ -17,16 +17,17 @@ Upsides:
 
 Arguables / downsides:
 - this is not necessary in most batch use, or in most notebooks, 
-  because you're loading the model to use it persistently and you're fine to incur that startup cost just once
+  because you're loading the model to use it persistently, you also incur that startup cost just once,
+  and you are not limited to just the parts we serialized:
 
-- It returns our own flattened-data version of the spacy objects (cherry-picking things to put in JSON)
+- It returns our own flattened-data version of the spacy objects (cherry-picking some attributes to put in JSON)
   - (yes, in theory spacy allows you to serialize the objects, but in practice this is messy and very inefficient)
-  - so it's yet another variant
+  - so we added yet another variant, 'yay'.
   - and there are plenty of things you couldn't really implement client-side without more work
 
 - not concurrent (yet?)
-  If indeed you put this up for public consumption, it will slow down with amount of users
-  even if you had computing power to spare
+  If indeed you put this up for shared/public consumption,
+  it will slow down with amount of users even if you had computing power to spare
 
 
 ## spacyserver-cli
