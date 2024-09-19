@@ -196,8 +196,8 @@ if __name__ == '__main__':
 
     ## Serve via HTTP
     def application(environ, start_response):
-        ''' Mostly just calls wetsuite.helpers.spacy.parse, which calls nlp() 
-            and returns a json-usable dict.   
+        ''' Mostly just calls api_spacyserver.parse, 
+            which calls nlp() and returns a json-usable dict.   
             Single-purpose, ignores path.
         '''
         output, response_headers = [], []
