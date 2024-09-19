@@ -3,14 +3,21 @@
 A small HTTP-served app that serves spacy's parsing from a persistent process,
 to do continuing work without incurring a whole bunch of startup time.
 
-There is a function in the wetsuite library that lets you consume this from code.
-TODO: separate from those origins so this stands alone.
+When run, starts a little HTTP-served web-app (WSGI internally) that
+- loads configured models (currently hardcoded to `en_core_web_lg`,`nl_core_news_lg`),
+- takes form-style data with text in `q`
+- determines language of that text, selects model based on that detection
+- runs model on that text
+- picks out some things to send in JSON response and returns that
 
 Upsides:
-- You can have a webapp, or CLI tool, give you parses of small text quickly
-  (CPU models seem to take on the rough order of 20ms per 100 words)
+- You can quickly add text parsing to a notebook, webapp, or CLI tool,
+  without adding much code or dependencies to that.
 
-- including SVG dependency tree
+- decently fast - the startup time was incurred a long time ago,
+  and for small pices of text, even CPU models seem to take on the rough order of 20ms per 100 words.
+
+- including SVG dependency tree if you want it
 
 - ...and anything you bolt on
 
@@ -30,7 +37,35 @@ Arguables / downsides:
   it will slow down with amount of users even if you had computing power to spare
 
 
+## spacy_server.py
+
+The server part of the server:
+- load models you need
+- wraps the it in a WSGI app
+- where for each request, decides which model you need for a piece of text
+
+## api_spacyserver.py
+
+The functional part of using one model on one piece of text, and deciding what to return:
+- `http_api()` is used by the client, which feeds the given text to a running spacy_server
+- `parse()` is used by the server - feeds text to an instantiated model.
+  - decides what to take from the 
+  - includes a hacky transform of the SVG dependency image, if you want it
+
+
 ## spacyserver-cli
 
+A script that you give some text, and prints out with some pretty colors. 
+
+It is meant as a visual example - you probably want to copy it and do something more useful with the dict it spits out.
+
 ![CLI example](screenshots/cli_cheese.png?raw=true)
+
+
+## Example 
+
+![Webpage example](screenshots/web_cheese.png?raw=true)
+
+TODO: put the JS for that here too
+
 
