@@ -29,3 +29,7 @@ Arguables / downsides:
   even if you had computing power to spare
 
 
+## spacyserver-cli
+
+![CLI example](screenshots/cli_cheese.png?raw=true)
+
