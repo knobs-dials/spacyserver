@@ -63,7 +63,7 @@ It is meant as a visual example - you probably want to copy it and do something 
 ![CLI example](screenshots/cli_cheese.png?raw=true)
 
 
-## Example 
+## web-served example
 
 ![Webpage example](screenshots/web_cheese.png?raw=true)
 
