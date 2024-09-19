@@ -4,8 +4,10 @@
     and pretty-prints the results on the console.
 '''
 import sys, time, pprint
-import wetsuite.helpers.spacyserver
-import wetsuite.helpers.shellcolor as sc
+from spacyserver import api_spacyserver
+
+import helpers_shellcolor as sc
+
 
 
 def main():
@@ -18,7 +20,7 @@ def main():
     q = q.strip()  # avoid a SPACE on the end from a stdin newline
 
     start = time.time()
-    resp = wetsuite.helpers.spacyserver.http_api(q)
+    resp = api_spacyserver.http_api(q)
     took  = time.time() - start
     print( "API fetch took %dms"%(1000.*took) )
 
@@ -26,8 +28,8 @@ def main():
     tokens    = resp.pop('tokens')
     sentences = resp.pop('sentences')
     # pop to take out the bulk and show the rest in pprint:
-    pprint.pprint( resp )
-    sys.stdout.write('\n')
+    #pprint.pprint( resp )
+    #sys.stdout.write('\n')
 
     cols = '  %3s %10s %-35s  %20s %-20s %-4s %-3s %-5s %25s   %s'
     print('Tokens:  ')
@@ -88,10 +90,7 @@ def main():
             showtok
         )) )
 
-
-
     sys.stdout.write('\n')
-
 
     for sentence in sentences:
         st, en = sentence['range']
