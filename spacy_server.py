@@ -1,20 +1,12 @@
 #!/usr/bin/python3
-'''
-    A small HTTP-served app that serves spacy's parsing from a persistent process,
-    to do continuing work without incurring a whole bunch of startup time.
+''' A small HTTP app that serves spacy's parsing from a persistent process.
+
+    The idea is that clients do intermitted parsing work,
+    without incurring a whole bunch of startup time.
 
     WSGI-style app, served via the basic HTTP server
     TODO: disentangle out app from that
 
-    Not part of core wetsuite because 
-     - it's extra dependencies,
-     - it returns the parse in a non-standard way  (cherry-picking things to put in JSON)
-     - it's not necessary in most batch use or in most notebooks 
-       (in both cases it's often fine to incur startup cost just once)
-    ...it's nice to have for web interfaces, though,
-    because it can give answers to short text within ~20ms
-    (CPU models seem to take on the rough order of 20ms per 100 words)
-    
     CONSIDER: 
     - trying to be multicore. That would need
       - letting you specify CPU models multiple times, to load it several times,
@@ -28,8 +20,14 @@
       - maybe put up a text limit on individual calls?
       - and provide a helper function that makes that easier, even if it's just based on 
         re.split(\n{2,}) and doing multiple calls
+
+    - consider async (except for GPU there is little to no point)
 '''
+
+from spacyserver import api_spacyserver
 import spacy
+import spacy_fastlang    #  pylint: disable=unused-import    it is used, by spacy internally
+# note: some imports are done later, mostly to suppress warnings
 
 def load_models( model_list ):
     ''' @param model_list: A list of 3-tuples, each
@@ -69,12 +67,9 @@ def load_models( model_list ):
 
 def pick_model( loaded_models, lang:str=None, name:str=None, fallback:bool=True):
     ''' Given 
-        - what load_models has done
-        - your preferences (probably in terms of language, possibly model name)
+        - what load_models() has done (so its (lang,pref,modelname,modelobject) tuples)
+        - your preferences  (probably mainly terms of language, sometimes model name)
         ...returns the model object that is loaded that best fits that.
-
-        The code below mostly just wants one of the right language 
-        (in my tests 'nl' or 'en'), via language detection 
         
         CONSIDER: implement preference if we have multiple for a language?
     '''
@@ -92,6 +87,37 @@ def pick_model( loaded_models, lang:str=None, name:str=None, fallback:bool=True)
         return loaded_models[0][2], loaded_models[0][3]
 
     return None,None
+
+
+_langdet_model = None
+
+def detect_language(text: str):  #  -> tuple(str, float)
+    """Note that this depends on spacy, spacy_fastlang, and (because of the last) fasttext.
+
+    Returns (lang, score)
+      - lang string as used by spacy          (xx if don't know)
+      - score is an approximated certainty
+
+    Depends on spacy_fastlang and loads it on first call of this function.  Which will fail if not installed.
+
+    CONSIDER: truncate the text to something reasonable to not use too much memory.   On parameter?
+    """
+    # monkey patch done before the import to suppress "`load_model` does not return WordVectorModel or SupervisedModel any more, but a `FastText` object which is very similar."
+    try:
+        import fasttext  # we depend on spacy_fastlang and fasttext
+        fasttext.FastText.eprint = lambda x: None
+    except ImportError:
+        pass
+
+    global _langdet_model
+    if _langdet_model is None:
+        # print("first-time load of spacy_fastlang into pipeline")
+        _langdet_model = spacy.blank("xx")
+        _langdet_model.add_pipe("language_detector")
+        # lang_model.max_length = 10000000 # we have a trivial pipeline, though  TODO: still check its memory requirements
+
+    doc = _langdet_model(text)
+    return doc._.language, doc._.language_score
 
 
 if __name__ == '__main__':
@@ -116,10 +142,7 @@ if __name__ == '__main__':
     torch.set_num_threads(1)
     import spacy
 
-    import wetsuite.helpers.spacy
-    import wetsuite.helpers.spacyserver
     # NOTE: that detect_language also implies a dependency on spacy_fastlang
-
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--model",
@@ -160,6 +183,7 @@ if __name__ == '__main__':
     serve_ip = args.bind_ip
     port     = int( args.bind_port )
 
+    ## TODO: separate that out to a "run-with-my-preference" startup script
     models_to_load = [ # try to not occupy the GPU unless you know your're its only user.
         ['en','cpu','en_core_web_lg' ],
         ['nl','cpu','nl_core_news_lg'],
@@ -189,7 +213,7 @@ if __name__ == '__main__':
 
         ## Detect the language of input text
         start = time.time()
-        lang, _ = wetsuite.helpers.spacy.detect_language( q )
+        lang, _ = detect_language( q )
         response['lang_detect_msec'] = '%d'%(1000*(time.time() - start))
         # CONSIDER: feed language detection only the first so-many words
 
@@ -203,10 +227,10 @@ if __name__ == '__main__':
         #import cupy_backends # purely for underlying exception, see below;
         #  commented to not hardcode a dependency for now
         try:
-            # spacyserver.parse() puts the interesting parts of the nlp object in JSON.
+            # parse() puts the interesting parts of the nlp object in JSON.
             #   this is non-standard and is only understood by some of our own browser code
             #   (also is faster than trying to save/parse as docbin or pickle)
-            dic = wetsuite.helpers.spacyserver.parse(
+            dic = api_spacyserver.parse( # XXX
                 nlp=nlp,
                 query_string=q,
                 nlp_lock=nlp_lock,
